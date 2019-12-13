@@ -52,6 +52,12 @@ def validator_clients_list(value):
     if not value:
         raise ValueError("List is empty on None")
 
+def validator_date(value):
+    try:
+        d = datetime.datetime.strptime(value, '%d.%m.%Y')
+    except ValueError:
+        raise ValueError("Date is not in correct format")
+
 class BaseField(object):
     """
     Базовый класс для полей
@@ -140,7 +146,7 @@ class RequestMeta(type):
         def get_method_score(self):
             store = {}
             if self.scoring_check():
-                return OK, self.scoring_func(**self.arguments)
+                return OK, self.scoring_func(self, store,  **self.arguments)
             else:
                 return None, INVALID_REQUEST
 
@@ -184,6 +190,7 @@ class RequestBase(object):
             try:
                 arguments[field_name] = field_inst.clean(self._raw_args.get(field_name, None ))
             except ValueError as e:
+                arguments[field_name] = None
                 self.fields_errs.append(field_name + ': ' + str(e))
         # if errs:
         #     raise ValueError('\n'.join(errs))
@@ -204,7 +211,10 @@ class ClientsInterestsRequest(RequestBase):
     __metaclass__ = RequestMeta
     client_ids = ClientIDsField(required=True)
     date = DateField(required=False, nullable=True)
-    scoring_func = get_interests
+
+    def scoring_func(self, store, client_ids, date):
+        return {cl: get_interests(store, cl) for cl in client_ids}
+
     def scoring_check(self):
         return True
 
@@ -273,6 +283,8 @@ class MethodRequest(RequestBase):
             return '\n'.join(self.fields_errs), INVALID_REQUEST
         elif self.method_err:
             return self.method_err, INVALID_REQUEST
+        elif self.method_inst.fields_errs:
+            return str(self.method_inst.fields_errs), INVALID_REQUEST
         else:
             return self.method_inst.get_method_score()
 

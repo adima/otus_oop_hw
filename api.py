@@ -36,7 +36,7 @@ GENDERS = {
     MALE: "male",
     FEMALE: "female",
 }
-NULL_VALUES = [None, '']
+NULL_VALUES = [None]
 
 
 def validator_string_type(value):
@@ -128,10 +128,13 @@ class BaseField(object):
     """
 
     null_values = NULL_VALUES
-    validators = []
-    val = None
+    validators = []             # Список функций валидации для поля
+    val = None                  # Текущее значение поля
 
     def __init__(self, required=False, nullable=False):
+        """
+        Инициализация с полями required и nullable
+        """
         self.required = required
         self.nullable = nullable
 
@@ -142,10 +145,16 @@ class BaseField(object):
             return False
 
     def validate(self, value):
-         if self.isnull(value) and (self.required or not self.nullable):
+        """
+        Валидация на предмет пустого значения required поля
+        """
+        if self.isnull(value) and (self.required or not self.nullable):
             raise ValueError("Required field is empty")
 
     def run_validators(self, value):
+        """
+        Запуск валидаторов из validators
+        """
         errors = []
         for v in self.validators:
             try:
@@ -157,6 +166,9 @@ class BaseField(object):
             raise ValueError('\n'.join(errors))
 
     def clean(self, value):
+        """
+        Задание значения полю
+        """
         self.val = None
         self.validate(value)
         self.run_validators(value)
@@ -164,6 +176,9 @@ class BaseField(object):
         return value
 
     def isnull_assigned(self):
+        """
+        Проверка, что текущее значение поля пустое
+        """
         return self.isnull(self.val)
 
 
@@ -208,6 +223,10 @@ class RequestMeta(type):
     так для MethodRequests
     """
     def __new__(mcs, name, bases, attrs):
+        """
+        В классе создается переменная fields в виде словаря, куда попадают все переменные класса,
+        которые наследуются от BaseField
+        """
         def get_method_score(self, ctx, store):
             """
             Если класс имеет атрибуты scoring check и scoring func, в его словарь также добавляется
@@ -233,25 +252,31 @@ class RequestMeta(type):
 
 
 class RequestBase(object):
+    """
+    Базовый класс для реквестов
+    """
     fields = {}
     clean_args = {}
     fields_errs = []
 
     def __init__(self, argmnts):
+        """
+        Инициализация: каждому полю ассайнится значение из аргументов
+        """
         if argmnts is None:
             argmnts = {}
         self._raw_args = argmnts
         self.assign_fields()
 
-    def pass_args(self, argmnts):
-        self._raw_args = argmnts
-
     def assign_fields(self):
+        """
+        Функция задает значение каждому полю из аргументов
+        """
         arguments = {}
         self.fields_errs = []
         for field_name, field_inst in self.fields.items():
             try:
-                arguments[field_name] = field_inst.clean(self._raw_args.get(field_name, None ))
+                arguments[field_name] = field_inst.clean(self._raw_args.get(field_name, None))
             except ValueError as e:
                 arguments[field_name] = None
                 self.fields_errs.append(field_name + ': ' + str(e))
@@ -259,6 +284,9 @@ class RequestBase(object):
 
     @property
     def arguments(self):
+        """
+        Возвращает аргументы прошедшие валидацию
+        """
         return self.clean_args
 
     @arguments.setter
@@ -268,10 +296,16 @@ class RequestBase(object):
 
     @property
     def non_empty_args(self):
+        """
+        Возвращает список непустых аргументов
+        """
         return [k for k, v in self.clean_args.items() if v is not None]
 
 
 class ClientsInterestsRequest(RequestBase):
+    """
+    Класс запроса интересов
+    """
     __metaclass__ = RequestMeta
     client_ids = ClientIDsField(required=True)
     date = DateField(required=False, nullable=True)
@@ -287,6 +321,9 @@ class ClientsInterestsRequest(RequestBase):
 
 
 class OnlineScoreRequest(RequestBase):
+    """
+    Класс запроса скоринга
+    """
     __metaclass__ = RequestMeta
     first_name = CharField(required=False, nullable=True)
     last_name = CharField(required=False, nullable=True)
@@ -307,6 +344,9 @@ class OnlineScoreRequest(RequestBase):
 
 
 class MethodRequest(RequestBase):
+    """
+    Класс парсинга post-запроса
+    """
     __metaclass__ = RequestMeta
     account = CharField(required=False, nullable=True)
     login = CharField(required=True, nullable=True)
@@ -318,6 +358,9 @@ class MethodRequest(RequestBase):
                   'clients_interests': ClientsInterestsRequest}
 
     def __init__(self, argmnts, ctx, store):
+        """
+        Иницаилизируются аргументы, передается context, store
+        """
         super(MethodRequest, self).__init__(argmnts)
         method = self.fields['method'].val
         logging.info("Initializing method request with %s" % method)
@@ -333,6 +376,9 @@ class MethodRequest(RequestBase):
             pass
 
     def check_auth(self):
+        """
+        Проверка аутентификации
+        """
         if self.is_admin:
             digest = hashlib.sha512(datetime.datetime.now().strftime("%Y%m%d%H") + ADMIN_SALT).hexdigest()
         else:
@@ -346,17 +392,23 @@ class MethodRequest(RequestBase):
         return self.fields['login'].val == ADMIN_LOGIN
 
     def get_admin_score(self, ctx, store):
+        """
+        Функция возврата скоринга, если пользователь админ
+        """
         ctx['has'] = self.method_inst.non_empty_args
         return {'score': 42}, OK
 
     def get_response(self):
-        if not self.check_auth():
-            logging.error("Wrong credentials provided")
-            return 'Wrong Credentials', FORBIDDEN
-        elif self.fields_errs:
+        """
+        Функция возврата овтета на запрос c обработкой различных сценариев ошибок
+        """
+        if self.fields_errs:
             fields_errs_str = '\n'.join(self.fields_errs)
             logging.error("Invalid Method request, the following fields have errors: %s" % fields_errs_str)
             return fields_errs_str, INVALID_REQUEST
+        elif not self.check_auth():
+            logging.error("Wrong credentials provided")
+            return 'Wrong Credentials', FORBIDDEN
         elif self.method_err:
             logging.error("Method name provided is wrong: %s" % self.method_err)
             return self.method_err, INVALID_REQUEST
@@ -372,20 +424,8 @@ class MethodRequest(RequestBase):
             return self.method_inst.get_method_score(self.ctx, self.store)
 
 
-def check_request(request):
-    if 'body' not in request:
-        return ERRORS[INVALID_REQUEST], INVALID_REQUEST
-
-    elif 'login' not in request['body']:
-        return ERRORS[INVALID_REQUEST], INVALID_REQUEST
-    return None, None
-
-
 def method_handler(request, ctx, store):
-    bad_reason, bad_code = check_request(request)
-    if bad_reason:
-        return bad_reason, bad_code
-    method_request = MethodRequest(request['body'], ctx, store)
+    method_request = MethodRequest(request.get('body'), ctx, store)
     return method_request.get_response()
 
 

@@ -7,6 +7,7 @@ import datetime
 import logging
 import hashlib
 import uuid
+import numbers
 from optparse import OptionParser
 from BaseHTTPServer import HTTPServer, BaseHTTPRequestHandler
 from scoring import get_interests, get_score
@@ -48,15 +49,55 @@ def validator_string_type(value):
     if type(value) not in [str, unicode]:
         raise ValueError("Type of value is not string")
 
+
 def validator_clients_list(value):
+    if type(value) is not list:
+        raise ValueError("Value is not a list")
     if not value:
         raise ValueError("List is empty on None")
 
+
+def validator_client_ids_isnum(values):
+    if not all([isinstance(val, numbers.Number) for val in values]):
+        raise ValueError("Client ids should be numeric")
+
+
 def validator_date(value):
-    try:
+    if value:
+        try:
+            d = datetime.datetime.strptime(value, '%d.%m.%Y')
+        except ValueError:
+            raise ValueError("Date is not in correct format")
+
+
+def validator_birthday(value):
+    if value:
         d = datetime.datetime.strptime(value, '%d.%m.%Y')
-    except ValueError:
-        raise ValueError("Date is not in correct format")
+        if (datetime.datetime.now() - d).days > 70:
+            raise ValueError("Birthday should be less than 70 years from now")
+
+
+def validator_phone(value):
+    values_s = str(value)
+    if not values_s.isdigit():
+        raise ValueError("Phone does not consist of digits")
+    elif not values_s.startswith('7'):
+        raise ValueError("Phone does not consist of digits")
+    elif len(values_s) != 11:
+        raise ValueError("Phone doesn't have length 11 digits")
+
+
+def validator_email(value):
+    if value:
+        if '@' not in value:
+            raise ValueError("Email does not contain @ sign")
+
+
+def validator_gender(value):
+    if value:
+        if value not in [0, 1, 2]:
+            raise ValueError("Gender should be a number 0, 1 or 2")
+
 
 class BaseField(object):
     """
@@ -88,6 +129,7 @@ class BaseField(object):
                 v(value)
             except ValueError as e:
                 errors.append(str(e))
+                continue
         if errors:
             raise ValueError('\n'.join(errors))
 
@@ -117,27 +159,27 @@ class ArgumentsField(BaseField):
 
 
 class EmailField(CharField):
-    pass
+    validators = CharField.validators + [validator_email]
 
 
 class PhoneField(BaseField):
-    pass
+    validators = BaseField.validators + [validator_phone]
 
 
 class DateField(BaseField):
-    pass
+    validators = BaseField.validators + [validator_date]
 
 
-class BirthDayField(BaseField):
-    pass
+class BirthDayField(DateField):
+    validators = DateField.validators + [validator_birthday]
 
 
 class GenderField(BaseField):
-    pass
+    validators = BaseField.validators + [validator_gender]
 
 
 class ClientIDsField(BaseField):
-    validators = BaseField.validators + [validator_clients_list]
+    validators = BaseField.validators + [validator_clients_list, validator_client_ids_isnum]
 
 
 
@@ -148,7 +190,7 @@ class RequestMeta(type):
             if self.scoring_check():
                 return OK, self.scoring_func(self, store,  **self.arguments)
             else:
-                return None, INVALID_REQUEST
+                return 'Conditions are not satisfied', INVALID_REQUEST
 
         fields = []
         for key, value in attrs.items():

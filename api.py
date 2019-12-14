@@ -38,6 +38,7 @@ GENDERS = {
 }
 NULL_VALUES = [None, '']
 
+
 def validator_string_type(value):
     """
     Функция. которая валидирует. что значение относится к строковому типу
@@ -51,6 +52,9 @@ def validator_string_type(value):
 
 
 def validator_clients_list(value):
+    """
+    Валидация списка клиентов
+    """
     if type(value) is not list:
         raise ValueError("Value is not a list")
     if not value:
@@ -58,11 +62,17 @@ def validator_clients_list(value):
 
 
 def validator_client_ids_isnum(values):
+    """
+    Валидация ID клиента на числовой тип
+    """
     if not all([isinstance(val, numbers.Number) for val in values]):
         raise ValueError("Client ids should be numeric")
 
 
 def validator_date(value):
+    """
+    Валидация даты
+    """
     if value:
         try:
             d = datetime.datetime.strptime(value, '%d.%m.%Y')
@@ -71,6 +81,9 @@ def validator_date(value):
 
 
 def validator_birthday(value):
+    """
+    Валидация дня рождения
+    """
     if value:
         d = datetime.datetime.strptime(value, '%d.%m.%Y')
         if (datetime.datetime.now() - d).days / 365.25 > 70:
@@ -78,6 +91,9 @@ def validator_birthday(value):
 
 
 def validator_phone(value):
+    """
+    Валидация телефона
+    """
     if value:
         values_s = str(value)
         if not values_s.isdigit():
@@ -89,12 +105,18 @@ def validator_phone(value):
 
 
 def validator_email(value):
+    """
+    Валидация email
+    """
     if value:
         if '@' not in value:
             raise ValueError("Email does not contain @ sign")
 
 
 def validator_gender(value):
+    """
+    Валидация пола
+    """
     if value:
         if value not in [0, 1, 2]:
             raise ValueError("Gender should be a number 0, 1 or 2")
@@ -144,9 +166,6 @@ class BaseField(object):
     def isnull_assigned(self):
         return self.isnull(self.val)
 
-    # def __get__(self):
-    #     return self.val
-
 
 class CharField(BaseField):
     """
@@ -183,11 +202,17 @@ class ClientIDsField(BaseField):
     validators = BaseField.validators + [validator_clients_list, validator_client_ids_isnum]
 
 
-
 class RequestMeta(type):
+    """
+    Метакласс для создания объектов типа Request. Может быть использован как для ScoreRequest, InterestsRequests,
+    так для MethodRequests
+    """
     def __new__(mcs, name, bases, attrs):
         def get_method_score(self, ctx, store):
-            # store = {}
+            """
+            Если класс имеет атрибуты scoring check и scoring func, в его словарь также добавляется
+            функция get_method_score
+            """
             if self.scoring_check():
                 req_resp = self.scoring_func(store, ctx, **self.arguments)
                 return req_resp, OK
@@ -207,25 +232,19 @@ class RequestMeta(type):
         return new_class
 
 
-# class MethodRequestMeta(RequestMeta):
-#     def __init__(cls, name, bases, attrs, **kwargs):
-#         if 'method' in attrs['args']:
-#             setattr(cls, attrs['args']['method'], attrs['args']['method'])
-        # super(RequestMeta, cls).__init__(name, bases, attrs)
-#
-
 class RequestBase(object):
     fields = {}
     clean_args = {}
+    fields_errs = []
 
-    def __init__(self, args):
-        if args is None:
-            args = {}
-        self._raw_args = args
+    def __init__(self, argmnts):
+        if argmnts is None:
+            argmnts = {}
+        self._raw_args = argmnts
         self.assign_fields()
 
-    def pass_args(self, args):
-        self._raw_args = args
+    def pass_args(self, argmnts):
+        self._raw_args = argmnts
 
     def assign_fields(self):
         arguments = {}
@@ -236,8 +255,6 @@ class RequestBase(object):
             except ValueError as e:
                 arguments[field_name] = None
                 self.fields_errs.append(field_name + ': ' + str(e))
-        # if errs:
-        #     raise ValueError('\n'.join(errs))
         self.clean_args = arguments
 
     @property
@@ -254,21 +271,19 @@ class RequestBase(object):
         return [k for k, v in self.clean_args.items() if v is not None]
 
 
-
-
 class ClientsInterestsRequest(RequestBase):
     __metaclass__ = RequestMeta
     client_ids = ClientIDsField(required=True)
     date = DateField(required=False, nullable=True)
 
-    def scoring_func(self, store, ctx, client_ids, date):
+    @staticmethod
+    def scoring_func(store, ctx, client_ids, date):
         ctx['nclients'] = len(client_ids)
         return {cl: get_interests(store, cl) for cl in client_ids}
 
-    def scoring_check(self):
+    @staticmethod
+    def scoring_check():
         return True
-
-
 
 
 class OnlineScoreRequest(RequestBase):
@@ -279,13 +294,12 @@ class OnlineScoreRequest(RequestBase):
     phone = PhoneField(required=False, nullable=True)
     birthday = BirthDayField(required=False, nullable=True)
     gender = GenderField(required=False, nullable=True)
-    # scoring_func = get_score
 
     def scoring_check(self):
         fields = self.fields
         return (not fields['phone'].isnull_assigned() and not fields['email'].isnull_assigned()) or \
-            (not fields['first_name'].isnull_assigned() and not fields['last_name'].isnull_assigned()) or \
-                (not fields['gender'].isnull_assigned() and not fields['birthday'].isnull_assigned())
+               (not fields['first_name'].isnull_assigned() and not fields['last_name'].isnull_assigned()) or \
+               (not fields['gender'].isnull_assigned() and not fields['birthday'].isnull_assigned())
 
     def scoring_func(self, store, ctx,  **kwargs):
         ctx['has'] = self.non_empty_args
@@ -303,10 +317,8 @@ class MethodRequest(RequestBase):
     method_map = {'online_score': OnlineScoreRequest,
                   'clients_interests': ClientsInterestsRequest}
 
-    def __init__(self, args, ctx, store):
-        super(MethodRequest, self).__init__(args)
-        # method_value = self.method.clean(args['method'])
-        # args_value = self.arguments.clean(args['arguments'])
+    def __init__(self, argmnts, ctx, store):
+        super(MethodRequest, self).__init__(argmnts)
         method = self.fields['method'].val
         logging.info("Initializing method request with %s" % method)
         arguments = self.fields['arguments'].val
@@ -360,9 +372,6 @@ class MethodRequest(RequestBase):
             return self.method_inst.get_method_score(self.ctx, self.store)
 
 
-
-
-
 def check_request(request):
     if 'body' not in request:
         return ERRORS[INVALID_REQUEST], INVALID_REQUEST
@@ -376,24 +385,8 @@ def method_handler(request, ctx, store):
     bad_reason, bad_code = check_request(request)
     if bad_reason:
         return bad_reason, bad_code
-
-    # elif not check_auth(request_body):
-    #     return ERRORS[FORBIDDEN], FORBIDDEN
-    # elif request_body.method is None:
-    #     return ERRORS[INVALID_REQUEST], INVALID_REQUEST
-    # else:
-    #     return None, None
-
-
-
     method_request = MethodRequest(request['body'], ctx, store)
     return method_request.get_response()
-    # pass
-
-
-
-    # response, code = None, None
-    # return response, code
 
 
 class MainHTTPHandler(BaseHTTPRequestHandler):

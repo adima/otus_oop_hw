@@ -308,6 +308,7 @@ class MethodRequest(RequestBase):
         # method_value = self.method.clean(args['method'])
         # args_value = self.arguments.clean(args['arguments'])
         method = self.fields['method'].val
+        logging.info("Initializing method request with %s" % method)
         arguments = self.fields['arguments'].val
         self.ctx = ctx
         self.store = store
@@ -338,16 +339,24 @@ class MethodRequest(RequestBase):
 
     def get_response(self):
         if not self.check_auth():
+            logging.error("Wrong credentials provided")
             return 'Wrong Credentials', FORBIDDEN
         elif self.fields_errs:
-            return '\n'.join(self.fields_errs), INVALID_REQUEST
+            fields_errs_str = '\n'.join(self.fields_errs)
+            logging.error("Invalid Method request, the following fields have errors: %s" % fields_errs_str)
+            return fields_errs_str, INVALID_REQUEST
         elif self.method_err:
+            logging.error("Method name provided is wrong: %s" % self.method_err)
             return self.method_err, INVALID_REQUEST
         elif self.method_inst.fields_errs:
-            return str(self.method_inst.fields_errs), INVALID_REQUEST
+            method_inst_field_errs = '\n'.join(self.method_inst.fields_errs)
+            logging.error("Invalid method fields: %s" % method_inst_field_errs)
+            return method_inst_field_errs, INVALID_REQUEST
         elif self.fields['method'].val == 'online_score' and self.is_admin:
+            logging.info("Returning online score for admin user")
             return self.get_admin_score(self.ctx, self.store)
         else:
+            logging.info("Returning results for method request")
             return self.method_inst.get_method_score(self.ctx, self.store)
 
 
@@ -432,36 +441,17 @@ class MainHTTPHandler(BaseHTTPRequestHandler):
 
 
 if __name__ == "__main__":
-    # op = OptionParser()
-    # op.add_option("-p", "--port", action="store", type=int, default=8080)
-    # op.add_option("-l", "--log", action="store", default=None)
-    # (opts, args) = op.parse_args()
-    # logging.basicConfig(filename=opts.log, level=logging.INFO,
-    #                     format='[%(asctime)s] %(levelname).1s %(message)s', datefmt='%Y.%m.%d %H:%M:%S')
-    # server = HTTPServer(("localhost", opts.port), MainHTTPHandler)
-    # logging.info("Starting server at %s" % opts.port)
-    # try:
-    #     server.serve_forever()
-    # except KeyboardInterrupt:
-    #     pass
-    # server.server_close()
-
-    # intests = ClientsInterestsRequest({'client_ids': '1', 'date': '12.12.2018'})
-    # print intests.arguments
-    # req = MethodRequest(dict(method='hui'))
-    # print 'whoa python 2'
-
-    context = {}
-    headers = {}
-    settings = {}
-    # arguments = {'email': 'stupnikov@otus.ru', 'phone': '79175002040'}
-    arguments = {"client_ids": [1, 2, 3], "date": datetime.datetime.today().strftime("%d.%m.%Y")}
-    # arguments = {'phone': '79175002040', 'birthday': '01.01.1890', 'email': 'stupnikov@otus.ru', 'gender': 1}
-    request = {"account": "horns&hoofs", "login": "h&f", "method": "online_score", "arguments": arguments}
-    # request = {"account": "horns&hoofs", "login": "admin", "method": "online_score", "arguments": arguments}
-    request["token"] = hashlib.sha512(datetime.datetime.now().strftime("%Y%m%d%H") + ADMIN_SALT).hexdigest()
-    # msg = request.get("account", "") + request.get("login", "") + SALT
-    # request["token"] = hashlib.sha512(msg).hexdigest()
-    # request = {}
-    response, code = method_handler({"body": request, "headers": headers}, context, settings)
-    print(response, code)
+    op = OptionParser()
+    op.add_option("-p", "--port", action="store", type=int, default=8080)
+    op.add_option("-l", "--log", action="store", default=None)
+    (opts, args) = op.parse_args()
+    logging.basicConfig(filename=opts.log, level=logging.INFO,
+                        format='[%(asctime)s] %(levelname).1s %(message)s', datefmt='%Y.%m.%d %H:%M:%S')
+    logging.getLogger().setLevel(logging.DEBUG)
+    server = HTTPServer(("localhost", opts.port), MainHTTPHandler)
+    logging.info("Starting server at %s" % opts.port)
+    try:
+        server.serve_forever()
+    except KeyboardInterrupt:
+        pass
+    server.server_close()

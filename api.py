@@ -73,18 +73,19 @@ def validator_date(value):
 def validator_birthday(value):
     if value:
         d = datetime.datetime.strptime(value, '%d.%m.%Y')
-        if (datetime.datetime.now() - d).days > 70:
+        if (datetime.datetime.now() - d).days / 365.25 > 70:
             raise ValueError("Birthday should be less than 70 years from now")
 
 
 def validator_phone(value):
-    values_s = str(value)
-    if not values_s.isdigit():
-        raise ValueError("Phone does not consist of digits")
-    elif not values_s.startswith('7'):
-        raise ValueError("Phone does not consist of digits")
-    elif len(values_s) != 11:
-        raise ValueError("Phone doesn't have length 11 digits")
+    if value:
+        values_s = str(value)
+        if not values_s.isdigit():
+            raise ValueError("Phone does not consist of digits")
+        elif not values_s.startswith('7'):
+            raise ValueError("Phone does not consist of digits")
+        elif len(values_s) != 11:
+            raise ValueError("Phone doesn't have length 11 digits")
 
 
 def validator_email(value):
@@ -185,10 +186,11 @@ class ClientIDsField(BaseField):
 
 class RequestMeta(type):
     def __new__(mcs, name, bases, attrs):
-        def get_method_score(self):
-            store = {}
+        def get_method_score(self, ctx, store):
+            # store = {}
             if self.scoring_check():
-                return OK, self.scoring_func(self, store,  **self.arguments)
+                req_resp = self.scoring_func(store, ctx, **self.arguments)
+                return req_resp, OK
             else:
                 return 'Conditions are not satisfied', INVALID_REQUEST
 
@@ -247,6 +249,11 @@ class RequestBase(object):
         self._raw_args = args
         self.assign_fields()
 
+    @property
+    def non_empty_args(self):
+        return [k for k, v in self.clean_args.items() if v is not None]
+
+
 
 
 class ClientsInterestsRequest(RequestBase):
@@ -254,7 +261,8 @@ class ClientsInterestsRequest(RequestBase):
     client_ids = ClientIDsField(required=True)
     date = DateField(required=False, nullable=True)
 
-    def scoring_func(self, store, client_ids, date):
+    def scoring_func(self, store, ctx, client_ids, date):
+        ctx['nclients'] = len(client_ids)
         return {cl: get_interests(store, cl) for cl in client_ids}
 
     def scoring_check(self):
@@ -271,13 +279,17 @@ class OnlineScoreRequest(RequestBase):
     phone = PhoneField(required=False, nullable=True)
     birthday = BirthDayField(required=False, nullable=True)
     gender = GenderField(required=False, nullable=True)
-    scoring_func = get_score
+    # scoring_func = get_score
 
     def scoring_check(self):
         fields = self.fields
         return (not fields['phone'].isnull_assigned() and not fields['email'].isnull_assigned()) or \
             (not fields['first_name'].isnull_assigned() and not fields['last_name'].isnull_assigned()) or \
                 (not fields['gender'].isnull_assigned() and not fields['birthday'].isnull_assigned())
+
+    def scoring_func(self, store, ctx,  **kwargs):
+        ctx['has'] = self.non_empty_args
+        return {'score': get_score(store, **kwargs) }
 
 
 class MethodRequest(RequestBase):
@@ -291,12 +303,14 @@ class MethodRequest(RequestBase):
     method_map = {'online_score': OnlineScoreRequest,
                   'clients_interests': ClientsInterestsRequest}
 
-    def __init__(self, args):
+    def __init__(self, args, ctx, store):
         super(MethodRequest, self).__init__(args)
         # method_value = self.method.clean(args['method'])
         # args_value = self.arguments.clean(args['arguments'])
         method = self.fields['method'].val
         arguments = self.fields['arguments'].val
+        self.ctx = ctx
+        self.store = store
         self.method_err = None
         try:
             self.method_inst = self.method_map[method](arguments)
@@ -318,6 +332,10 @@ class MethodRequest(RequestBase):
     def is_admin(self):
         return self.fields['login'].val == ADMIN_LOGIN
 
+    def get_admin_score(self, ctx, store):
+        ctx['has'] = self.method_inst.non_empty_args
+        return {'score': 42}, OK
+
     def get_response(self):
         if not self.check_auth():
             return 'Wrong Credentials', FORBIDDEN
@@ -327,8 +345,10 @@ class MethodRequest(RequestBase):
             return self.method_err, INVALID_REQUEST
         elif self.method_inst.fields_errs:
             return str(self.method_inst.fields_errs), INVALID_REQUEST
+        elif self.fields['method'].val == 'online_score' and self.is_admin:
+            return self.get_admin_score(self.ctx, self.store)
         else:
-            return self.method_inst.get_method_score()
+            return self.method_inst.get_method_score(self.ctx, self.store)
 
 
 
@@ -357,7 +377,7 @@ def method_handler(request, ctx, store):
 
 
 
-    method_request = MethodRequest(request['body'])
+    method_request = MethodRequest(request['body'], ctx, store)
     return method_request.get_response()
     # pass
 
